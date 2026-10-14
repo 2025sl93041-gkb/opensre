@@ -104,22 +104,22 @@ class StructuredOutputClient:
             raw_response, masking = self._base.invoke(wrapped_prompt), None
 
         payload = extract_json_payload(raw_response.content)
-        validated_payload = payload
+
+        if masking is not None:
+            # Unmask before model_validate so typed fields (e.g. IPvAnyAddress)
+            # receive real values, not placeholders.
+            payload = json.loads(masking.unmask(json.dumps(payload)))
+
         try:
-            result = self._model.model_validate(validated_payload)
+            result = self._model.model_validate(payload)
         except ValidationError:
             if isinstance(payload, list) and "actions" in self._model.model_fields:
-                validated_payload = {"actions": payload, "rationale": "LLM returned actions only."}
-                result = self._model.model_validate(validated_payload)
+                payload = {"actions": payload, "rationale": "LLM returned actions only."}
+                result = self._model.model_validate(payload)
             else:
                 raise
 
-        if masking is None:
-            return result
-        # Unmask string values inside the parsed JSON payload (safe: placeholders
-        # never contain quotes, so unmasking inside serialised JSON is always valid).
-        unmasked_payload = json.loads(masking.unmask(json.dumps(validated_payload)))
-        return self._model.model_validate(unmasked_payload)
+        return result
 
 
 def safe_json_loads(payload: str) -> Any:
