@@ -6,6 +6,7 @@ import sys
 import time
 from unittest.mock import MagicMock, patch
 
+from config.constants.masking import OPENSRE_MASK_ENABLED_ENV, OPENSRE_MASK_KINDS_ENV
 from core.llm.types import ModelType
 from integrations.llm_cli.base import CLIInvocation, CLIProbe
 from integrations.llm_cli.runner import CLIBackedLLMClient
@@ -237,6 +238,7 @@ def test_invoke_stream_yields_plain_stdout_before_process_exit() -> None:
 
     assert first == "a" * 160
     assert first_elapsed < 0.8
+    assert first + rest == ("a" * 200) + "done"
 
 
 @patch("integrations.llm_cli.runner.subprocess.run")
@@ -252,8 +254,8 @@ def test_masking_applied_to_outgoing_prompt_and_unmasked_in_response(
         captured["prompt"] = prompt
         return MagicMock(argv=("/usr/bin/mock-cli",), stdin=prompt, cwd="/tmp", env=None, timeout_sec=30.0)
 
-    monkeypatch.setenv("OPENSRE_MASK_ENABLED", "true")
-    monkeypatch.setenv("OPENSRE_MASK_KINDS", "ip_address")
+    monkeypatch.setenv(OPENSRE_MASK_ENABLED_ENV, "true")
+    monkeypatch.setenv(OPENSRE_MASK_KINDS_ENV, "ip_address")
 
     mock_adapter = MagicMock()
     mock_adapter.name = "copilot"
@@ -274,3 +276,32 @@ def test_masking_applied_to_outgoing_prompt_and_unmasked_in_response(
     # Response must restore the real IP from the placeholder
     assert real_ip in response.content, "real IP not restored in response"
     assert "<IP_ADDRESS_0>" not in response.content
+
+
+def test_masking_applied_and_unmasked_in_invoke_stream(monkeypatch) -> None:
+    """invoke_stream buffering branch: placeholder in streamed output must be unmasked.
+
+    Regression for issue #6714 — streaming path. The CLI outputs the masked
+    placeholder; invoke_stream must buffer and unmask before yielding.
+    """
+    real_ip = "10.0.1.42"
+    placeholder = "<IP_ADDRESS_0>"
+
+    # Script emits the placeholder split across two writes to exercise buffering
+    script = (
+        f"import sys; "
+        f"sys.stdout.write('{placeholder} is unreachable'); "
+        f"sys.stdout.flush()"
+    )
+
+    monkeypatch.setenv(OPENSRE_MASK_ENABLED_ENV, "true")
+    monkeypatch.setenv(OPENSRE_MASK_KINDS_ENV, "ip_address")
+
+    with patch("infrastructure.safety.guardrails.evaluator.get_guardrail_evaluator") as gr:
+        gr.return_value.is_active = False
+        client = CLIBackedLLMClient(_PlainStreamingAdapter(script))
+        chunks = list(client.invoke_stream(f"check host {real_ip}"))
+
+    combined = "".join(chunks)
+    assert real_ip in combined, "real IP not restored in streamed output"
+    assert placeholder not in combined, "placeholder leaked into streamed output"

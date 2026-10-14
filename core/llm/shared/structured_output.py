@@ -95,15 +95,31 @@ class StructuredOutputClient:
         wrapped_prompt = (
             f"{prompt}\n\nReturn ONLY valid JSON that matches this schema:\n{schema_json}\n"
         )
-        response = self._base.invoke(wrapped_prompt)
-        payload = extract_json_payload(response.content)
+        # Use _invoke_raw when available: unmask AFTER JSON parsing so
+        # quote-containing values (e.g. ab"cd) never corrupt the JSON structure.
+        _invoke_raw = getattr(self._base, "_invoke_raw", None)
+        if callable(_invoke_raw):
+            raw_response, masking = _invoke_raw(wrapped_prompt)
+        else:
+            raw_response, masking = self._base.invoke(wrapped_prompt), None
+
+        payload = extract_json_payload(raw_response.content)
+        validated_payload = payload
         try:
-            return self._model.model_validate(payload)
+            result = self._model.model_validate(validated_payload)
         except ValidationError:
             if isinstance(payload, list) and "actions" in self._model.model_fields:
-                fallback = {"actions": payload, "rationale": "LLM returned actions only."}
-                return self._model.model_validate(fallback)
-            raise
+                validated_payload = {"actions": payload, "rationale": "LLM returned actions only."}
+                result = self._model.model_validate(validated_payload)
+            else:
+                raise
+
+        if masking is None:
+            return result
+        # Unmask string values inside the parsed JSON payload (safe: placeholders
+        # never contain quotes, so unmasking inside serialised JSON is always valid).
+        unmasked_payload = json.loads(masking.unmask(json.dumps(validated_payload)))
+        return self._model.model_validate(unmasked_payload)
 
 
 def safe_json_loads(payload: str) -> Any:

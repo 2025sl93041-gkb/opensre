@@ -279,7 +279,14 @@ class CLIBackedLLMClient:
         )
         return LLMResponse(content=content)
 
-    def invoke(self, prompt_or_messages: Any) -> LLMResponse:
+    def _invoke_raw(
+        self, prompt_or_messages: Any
+    ) -> tuple[LLMResponse, MaskingRules | None]:
+        """Run the CLI and return the response together with the active masking rules.
+
+        Callers that need to unmask after JSON parsing (e.g. StructuredOutputClient)
+        use this instead of invoke() so quote-containing values never corrupt JSON.
+        """
         prepared = self._prepare_invocation(prompt_or_messages)
         invocation = prepared.invocation
 
@@ -317,18 +324,21 @@ class CLIBackedLLMClient:
                 time.sleep(backoff)
                 backoff *= 2
                 continue
-            response = self._response_from_completed_process(
+            return self._response_from_completed_process(
                 returncode=proc.returncode,
                 stdout=proc.stdout or "",
                 stderr=proc.stderr or "",
                 auth_probe_unclear=prepared.auth_probe_unclear,
                 auth_probe_detail=prepared.auth_probe_detail,
-            )
-            if prepared.masking is not None:
-                response = LLMResponse(content=prepared.masking.unmask(response.content))
-            return response
+            ), prepared.masking
 
         raise CLITimeoutError(f"{self._adapter.name} reported repeated temporary failures.")
+
+    def invoke(self, prompt_or_messages: Any) -> LLMResponse:
+        response, masking = self._invoke_raw(prompt_or_messages)
+        if masking is not None:
+            response = LLMResponse(content=masking.unmask(response.content))
+        return response
 
     def _run_plain_stdout_stream(
         self,
