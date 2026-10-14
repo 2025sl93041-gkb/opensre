@@ -51,6 +51,21 @@ def _force_additional_properties_false(node: Any) -> Any:
     return node
 
 
+def _deep_unmask(obj: Any, masking: Any) -> Any:
+    """Recursively unmask string values in a parsed JSON structure.
+
+    Avoids a JSON round-trip (json.dumps → unmask → json.loads) which breaks
+    when an unmasked value contains a double-quote character.
+    """
+    if isinstance(obj, dict):
+        return {k: _deep_unmask(v, masking) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_deep_unmask(v, masking) for v in obj]
+    if isinstance(obj, str):
+        return masking.unmask(obj)
+    return obj
+
+
 class StructuredOutputClient:
     """Wrap any LLM client with ``invoke`` for Pydantic JSON parsing."""
 
@@ -106,9 +121,9 @@ class StructuredOutputClient:
         payload = extract_json_payload(raw_response.content)
 
         if masking is not None:
-            # Unmask before model_validate so typed fields (e.g. IPvAnyAddress)
-            # receive real values, not placeholders.
-            payload = json.loads(masking.unmask(json.dumps(payload)))
+            # Deep-unmask each string value individually: avoids a JSON
+            # round-trip that would break if an unmasked value contains '"'.
+            payload = _deep_unmask(payload, masking)
 
         try:
             result = self._model.model_validate(payload)

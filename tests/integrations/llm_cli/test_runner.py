@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from types import SimpleNamespace
 import time
 from unittest.mock import MagicMock, patch
 
@@ -279,28 +280,37 @@ def test_masking_applied_to_outgoing_prompt_and_unmasked_in_response(
 
 
 def test_masking_applied_and_unmasked_in_invoke_stream(monkeypatch) -> None:
-    """invoke_stream buffering branch: placeholder in streamed output must be unmasked.
+    """invoke_stream buffering: placeholder split across chunks must be unmasked.
 
-    Regression for issue #6714 — streaming path. The CLI outputs the masked
-    placeholder; invoke_stream must buffer and unmask before yielding.
+    Regression for issue #6714 — streaming path. The buffering logic assembles
+    all chunks before calling unmask(). This test splits the placeholder across
+    two yielded chunks so that per-chunk unmasking would silently fail, proving
+    the buffer-then-unmask path is exercised.
     """
     real_ip = "10.0.1.42"
     placeholder = "<IP_ADDRESS_0>"
+    half = len(placeholder) // 2
+    chunk_a = placeholder[:half]          # e.g. "<IP_ADDR"
+    chunk_b = placeholder[half:] + " is unreachable"  # e.g. "ESS_0> is unreachable"
 
-    # Script emits the placeholder split across two writes to exercise buffering
-    script = (
-        f"import sys; "
-        f"sys.stdout.write('{placeholder} is unreachable'); "
-        f"sys.stdout.flush()"
-    )
+    def _mock_stream(*_args, **_kwargs):
+        yield chunk_a
+        yield chunk_b
+        return SimpleNamespace(
+            returncode=0,
+            stdout=placeholder + " is unreachable",
+            stderr="",
+            emitted=True,
+        )
 
     monkeypatch.setenv(OPENSRE_MASK_ENABLED_ENV, "true")
     monkeypatch.setenv(OPENSRE_MASK_KINDS_ENV, "ip_address")
 
     with patch("infrastructure.safety.guardrails.evaluator.get_guardrail_evaluator") as gr:
         gr.return_value.is_active = False
-        client = CLIBackedLLMClient(_PlainStreamingAdapter(script))
-        chunks = list(client.invoke_stream(f"check host {real_ip}"))
+        client = CLIBackedLLMClient(_PlainStreamingAdapter(""))
+        with patch.object(client, "_run_plain_stdout_stream", side_effect=_mock_stream):
+            chunks = list(client.invoke_stream(f"check host {real_ip}"))
 
     combined = "".join(chunks)
     assert real_ip in combined, "real IP not restored in streamed output"
