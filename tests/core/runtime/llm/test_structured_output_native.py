@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +12,11 @@ from pydantic import BaseModel, Field
 from pydantic.networks import IPvAnyAddress
 
 from config.constants.llm import OPENSRE_LLM_NATIVE_STRUCTURED_OUTPUT_ENV
-from config.constants.masking import OPENSRE_MASK_ENABLED_ENV, OPENSRE_MASK_KINDS_ENV
+from config.constants.masking import (
+    OPENSRE_MASK_ENABLED_ENV,
+    OPENSRE_MASK_EXTRA_REGEX_ENV,
+    OPENSRE_MASK_KINDS_ENV,
+)
 from core.llm.shared.structured_output import (
     StructuredOutputClient,
     json_schema_for_structured_output,
@@ -130,3 +136,50 @@ def test_structured_output_unmasks_typed_field_before_validate(
         result = StructuredOutputClient(cli, _HostResult).invoke(f"check host {real_ip}")
 
     assert str(result.host) == real_ip
+
+
+class _AnswerResult(BaseModel):
+    answer: str
+
+
+@patch("integrations.llm_cli.runner.subprocess.run")
+def test_structured_output_deep_unmask_handles_quoted_value(
+    mock_run: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_deep_unmask must restore values containing double-quote characters.
+
+    Regression for the JSON round-trip bug: json.loads(masking.unmask(json.dumps()))
+    breaks when an unmasked value contains '"'. _deep_unmask() replaces each string
+    value individually, so quote-containing values never corrupt the JSON structure.
+    """
+    quoted_value = 'ab"cd'
+    # Use a custom extra-regex label so the placeholder is deterministic: <QUOTED_VAL_0>
+    placeholder = "<QUOTED_VAL_0>"
+    extra_patterns = json.dumps({"QUOTED_VAL": re.escape(quoted_value)})
+
+    monkeypatch.setenv(OPENSRE_MASK_ENABLED_ENV, "true")
+    monkeypatch.setenv(OPENSRE_MASK_EXTRA_REGEX_ENV, extra_patterns)
+
+    mock_adapter = MagicMock()
+    mock_adapter.name = "mock-cli"
+    mock_adapter.detect.return_value = MagicMock(
+        installed=True, bin_path="/usr/bin/mock", logged_in=True, detail="ok"
+    )
+    mock_adapter.build.return_value = MagicMock(
+        argv=("/usr/bin/mock",), stdin=None, cwd="/tmp", env=None, timeout_sec=30.0
+    )
+    mock_adapter.parse.side_effect = lambda *, stdout, stderr, returncode: stdout.strip()
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout=f'{{"answer": "{placeholder}"}}\n',
+        stderr="",
+    )
+
+    with patch("infrastructure.safety.guardrails.evaluator.get_guardrail_evaluator") as gr:
+        gr.return_value.is_active = False
+        cli = CLIBackedLLMClient(mock_adapter)
+        result = StructuredOutputClient(cli, _AnswerResult).invoke(
+            f"what is the answer to {quoted_value}"
+        )
+
+    assert result.answer == quoted_value
