@@ -153,3 +153,12 @@ def test_partial_overlap_matches_do_not_corrupt_text() -> None:
     assert masked.count("<") == 1
     # Round trip returns the original text byte-for-byte.
     assert ctx.unmask(masked) == "host 192.168.1.50 online"
+
+
+def test_unmask_value_restores_nested_map_keys() -> None:
+    ctx = _enabled_ctx()
+    original = "192.168.1.50"
+    placeholder = ctx.mask(original)
+    payload = {"inputs": [{placeholder: placeholder}], 7: True}
+
+    assert ctx.unmask_value(payload) == {"inputs": [{original: original}], 7: True}

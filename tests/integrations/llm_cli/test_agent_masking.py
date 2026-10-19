@@ -26,7 +26,7 @@ def test_agent_restores_masked_values_after_parsing(
     monkeypatch.setenv(OPENSRE_MASK_ENABLED_ENV, "true")
     monkeypatch.setenv(OPENSRE_MASK_KINDS_ENV, "ip_address")
     monkeypatch.setenv(OPENSRE_MASK_EXTRA_REGEX_ENV, json.dumps({"QUOTED_VAL": re.escape(value)}))
-    arguments = {"values": [placeholder]}
+    arguments = {"values": [placeholder], "inputs": {placeholder: True}}
     if envelope == "final":
         stdout = f"Found {placeholder}"
     else:
@@ -67,4 +67,4 @@ def test_agent_restores_masked_values_after_parsing(
         assert result.content == ""
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "lookup"
-        assert result.tool_calls[0].input == {"values": [value]}
+        assert result.tool_calls[0].input == {"values": [value], "inputs": {value: True}}

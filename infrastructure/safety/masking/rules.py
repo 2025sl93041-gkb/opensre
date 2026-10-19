@@ -157,11 +157,14 @@ class MaskingRules:
         return value
 
     def unmask_value(self, value: Any) -> Any:
-        """Recursively unmask strings inside dicts/lists/tuples."""
+        """Recursively restore strings, including dictionary keys, in containers."""
         if isinstance(value, str):
             return self.unmask(value)
         if isinstance(value, dict):
-            return {k: self.unmask_value(v) for k, v in value.items()}
+            return {
+                (self.unmask(k) if isinstance(k, str) else k): self.unmask_value(v)
+                for k, v in value.items()
+            }
         if isinstance(value, list):
             return [self.unmask_value(v) for v in value]
         if isinstance(value, tuple):
