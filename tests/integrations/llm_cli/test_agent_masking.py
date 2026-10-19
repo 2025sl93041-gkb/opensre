@@ -55,9 +55,26 @@ def test_agent_restores_masked_values_after_parsing(
         guardrails.return_value.is_active = False
         run.return_value = MagicMock(returncode=0, stdout=stdout, stderr="")
         client = CLIBackedAgentClient(adapter)
-        result = client.invoke([{"role": "user", "content": f"Look up {value}"}])
+        messages = [{"role": "user", "content": f"Look up {value}"}]
+        result = client.invoke(
+            messages,
+            tools=[{"name": "lookup", "input_schema": {"type": "object", "examples": [value]}}],
+        )
+        if envelope != "final":
+            assert len(result.tool_calls) == 1
+            messages.append(client.build_assistant_message(result.content, result.tool_calls))
+            messages.append(
+                client.build_tool_result_message(result.tool_calls, [{"result": {value: value}}])
+            )
+            run.return_value = MagicMock(returncode=0, stdout=f"Found {placeholder}", stderr="")
+            final = client.invoke(messages)
+            assert final.content == f"Found {value}"
 
-    assert len(captured) == 1
+    assert len(captured) == (1 if envelope == "final" else 2)
+    for prompt in captured:
+        assert value not in prompt
+        assert json.dumps(value)[1:-1] not in prompt
+
     assert value not in captured[0]
     assert placeholder in captured[0]
     if envelope == "final":
@@ -68,3 +85,27 @@ def test_agent_restores_masked_values_after_parsing(
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "lookup"
         assert result.tool_calls[0].input == {"values": [value], "inputs": {value: True}}
+
+
+def test_structured_history_applies_guardrails_before_reversible_masking() -> None:
+    from infrastructure.safety.masking.policy import MaskingPolicy
+    from infrastructure.safety.masking.rules import MaskingRules
+    from integrations.llm_cli.text import flatten_messages_to_prompt
+
+    original = "192.168.1.50"
+    masking = MaskingRules(MaskingPolicy(enabled=True, kinds=("ip_address",)))
+
+    def redact(text: str) -> str:
+        return text.replace(original, "[REDACTED]")
+
+    with patch("infrastructure.safety.guardrails.evaluator.get_guardrail_evaluator") as guardrails:
+        guardrails.return_value.is_active = True
+        guardrails.return_value.apply.side_effect = redact
+        prompt = flatten_messages_to_prompt(
+            [{"role": "user", "content": [{"type": "json", "data": {"host": original}}]}],
+            masking=masking,
+        )
+
+    assert original not in prompt
+    assert "[REDACTED]" in prompt
+    assert masking.placeholder_map == {}

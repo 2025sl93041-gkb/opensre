@@ -145,11 +145,14 @@ class MaskingRules:
         )
 
     def mask_value(self, value: Any) -> Any:
-        """Recursively mask strings inside dicts/lists/tuples."""
+        """Recursively mask strings, including dictionary keys, in containers."""
         if isinstance(value, str):
             return self.mask(value)
         if isinstance(value, dict):
-            return {k: self.mask_value(v) for k, v in value.items()}
+            return {
+                (self.mask(k) if isinstance(k, str) else k): self.mask_value(v)
+                for k, v in value.items()
+            }
         if isinstance(value, list):
             return [self.mask_value(v) for v in value]
         if isinstance(value, tuple):

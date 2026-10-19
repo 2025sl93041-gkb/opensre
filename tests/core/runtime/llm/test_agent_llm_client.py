@@ -1469,7 +1469,7 @@ def test_cli_tool_call_input_unparseable_arguments_stay_empty() -> None:
 
 
 def test_cli_backed_agent_client_build_assistant_message_includes_tool_json() -> None:
-    """Assistant history must retain tool_calls JSON for multi-turn CLI prompts."""
+    """Assistant history retains structured arguments until the CLI serializes them."""
     from core.llm.transports.sdk.agent_clients import CLIBackedAgentClient
     from core.llm.types import ToolCall
 
@@ -1478,9 +1478,12 @@ def test_cli_backed_agent_client_build_assistant_message_includes_tool_json() ->
         [ToolCall(id="t1", name="query_logs", input={"q": "error"})],
     )
     assert msg["role"] == "assistant"
-    assert "query_logs" in msg["content"]
-    assert '"tool_calls"' in msg["content"]
-    assert "t1" in msg["content"]
+    assert msg["content"] == [
+        {
+            "type": "json",
+            "data": {"tool_calls": [{"id": "t1", "name": "query_logs", "input": {"q": "error"}}]},
+        }
+    ]
 
 
 def test_try_parse_tool_call_json_uses_raw_decode_not_greedy_brace_span() -> None:

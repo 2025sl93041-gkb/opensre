@@ -159,6 +159,8 @@ def test_unmask_value_restores_nested_map_keys() -> None:
     ctx = _enabled_ctx()
     original = "192.168.1.50"
     placeholder = ctx.mask(original)
-    payload = {"inputs": [{placeholder: placeholder}], 7: True}
+    payload = {"inputs": [{original: original}], 7: True}
+    masked = ctx.mask_value(payload)
 
-    assert ctx.unmask_value(payload) == {"inputs": [{original: original}], 7: True}
+    assert masked == {"inputs": [{placeholder: placeholder}], 7: True}
+    assert ctx.unmask_value(masked) == payload

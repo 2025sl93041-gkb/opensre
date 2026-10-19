@@ -148,13 +148,11 @@ class CLIBackedLLMClient:
 
         from infrastructure.safety.guardrails.apply import apply_guardrails_to_text
 
-        flat = flatten_messages_to_prompt(prompt_or_messages)
+        policy = MaskingPolicy.from_env()
+        masking = MaskingRules(policy) if policy.enabled else None
+        flat = flatten_messages_to_prompt(prompt_or_messages, masking=masking)
         flat = apply_guardrails_to_text(flat)
-
-        masking: MaskingRules | None = None
-        _policy = MaskingPolicy.from_env()
-        if _policy.enabled:
-            masking = MaskingRules(_policy)
+        if masking is not None:
             flat = masking.mask(flat)
 
         probe = self._probe()
