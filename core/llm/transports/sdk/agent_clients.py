@@ -971,11 +971,14 @@ class CLIBackedAgentClient:
                     if not isinstance(name, str) or not name.strip():
                         continue
                     tool_input = _cli_tool_call_input(tc)
+                    call_id = str(tc.get("id") or f"call_{i}")
                     if masking is not None:
+                        name = masking.unmask(name)
+                        call_id = masking.unmask(call_id)
                         tool_input = masking.unmask_value(tool_input)
                     tool_calls.append(
                         ToolCall(
-                            id=str(tc.get("id") or f"call_{i}"),
+                            id=call_id,
                             name=name.strip(),
                             input=tool_input,
                         )

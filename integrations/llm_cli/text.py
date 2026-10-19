@@ -37,8 +37,14 @@ def flatten_messages_to_prompt(
                         from infrastructure.safety.guardrails.apply import apply_guardrails_to_text
 
                         # Guardrails still see original values before reversible masking.
-                        guarded = json.loads(apply_guardrails_to_text(payload))
-                        payload = json.dumps(masking.mask_value(guarded), default=str)
+                        try:
+                            guarded = json.loads(apply_guardrails_to_text(payload))
+                        except json.JSONDecodeError:
+                            # A free-form redaction can destroy JSON. Omit the block
+                            # rather than forward any remaining escaped identifiers.
+                            payload = "[REDACTED]"
+                        else:
+                            payload = json.dumps(masking.mask_value(guarded), default=str)
                     text_bits.append(payload)
                 else:
                     text_bits.append(str(block))
