@@ -17,6 +17,8 @@ from pydantic import BaseModel
 from config.llm_reasoning_effort import ReasoningEffort, get_active_reasoning_effort
 from core.llm.shared.structured_output import StructuredOutputClient
 from core.llm.types import LLMResponse, ModelType
+from infrastructure.safety.masking.policy import MaskingPolicy
+from infrastructure.safety.masking.rules import MaskingRules
 from integrations.llm_cli.base import CLIInvocation, CLIProbe, LLMCLIAdapter
 from integrations.llm_cli.constants import (
     EX_TEMPFAIL as _EX_TEMPFAIL,
@@ -36,8 +38,6 @@ from integrations.llm_cli.errors import (
     CLITimeoutError,
 )
 from integrations.llm_cli.subprocess_env import build_cli_subprocess_env
-from infrastructure.safety.masking.policy import MaskingPolicy
-from infrastructure.safety.masking.rules import MaskingRules
 from integrations.llm_cli.text import flatten_messages_to_prompt
 
 logger = logging.getLogger(__name__)
@@ -279,9 +279,7 @@ class CLIBackedLLMClient:
         )
         return LLMResponse(content=content)
 
-    def _invoke_raw(
-        self, prompt_or_messages: Any
-    ) -> tuple[LLMResponse, MaskingRules | None]:
+    def _invoke_raw(self, prompt_or_messages: Any) -> tuple[LLMResponse, MaskingRules | None]:
         """Run the CLI and return the response together with the active masking rules.
 
         Callers that need to unmask after JSON parsing (e.g. StructuredOutputClient)

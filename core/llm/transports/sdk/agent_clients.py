@@ -948,7 +948,13 @@ class CLIBackedAgentClient:
         instruction = self._TOOL_CALL_INSTRUCTION + tool_block
         prompt = f"{system_block}{instruction}\n\n{flatten_cli_messages_to_prompt(messages)}"
 
-        text = self._cli_client.invoke(prompt).content.strip()
+        # Keep placeholders until both the tool envelope and its arguments are parsed.
+        invoke_raw = getattr(self._cli_client, "_invoke_raw", None)
+        if callable(invoke_raw):
+            response, masking = invoke_raw(prompt)
+        else:
+            response, masking = self._cli_client.invoke(prompt), None
+        text = response.content.strip()
 
         # Try to parse a JSON tool call response.
         tool_calls: list[ToolCall] = []
@@ -962,17 +968,22 @@ class CLIBackedAgentClient:
                     name = tc.get("name")
                     if not isinstance(name, str) or not name.strip():
                         continue
+                    tool_input = _cli_tool_call_input(tc)
+                    if masking is not None:
+                        tool_input = masking.unmask_value(tool_input)
                     tool_calls.append(
                         ToolCall(
                             id=str(tc.get("id") or f"call_{i}"),
                             name=name.strip(),
-                            input=_cli_tool_call_input(tc),
+                            input=tool_input,
                         )
                     )
             content = "" if tool_calls else text
         else:
             content = text
 
+        if masking is not None:
+            content = masking.unmask(content)
         return AgentLLMResponse(
             content=content,
             tool_calls=tool_calls,

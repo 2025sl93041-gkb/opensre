@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from types import SimpleNamespace
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from config.constants.masking import OPENSRE_MASK_ENABLED_ENV, OPENSRE_MASK_KINDS_ENV
@@ -251,9 +251,13 @@ def test_masking_applied_to_outgoing_prompt_and_unmasked_in_response(
     real_ip = "10.0.1.42"
     captured: dict[str, str] = {}
 
-    def _build(*, prompt: str, model: str | None, workspace: str, reasoning_effort: str | None = None) -> MagicMock:
+    def _build(
+        *, prompt: str, model: str | None, workspace: str, reasoning_effort: str | None = None
+    ) -> MagicMock:
         captured["prompt"] = prompt
-        return MagicMock(argv=("/usr/bin/mock-cli",), stdin=prompt, cwd="/tmp", env=None, timeout_sec=30.0)
+        return MagicMock(
+            argv=("/usr/bin/mock-cli",), stdin=prompt, cwd="/tmp", env=None, timeout_sec=30.0
+        )
 
     monkeypatch.setenv(OPENSRE_MASK_ENABLED_ENV, "true")
     monkeypatch.setenv(OPENSRE_MASK_KINDS_ENV, "ip_address")
@@ -263,8 +267,10 @@ def test_masking_applied_to_outgoing_prompt_and_unmasked_in_response(
     mock_adapter.detect.return_value = _mock_probe()
     mock_adapter.build.side_effect = _build
     # Simulate CLI echoing the placeholder back in its response
-    mock_adapter.parse.side_effect = lambda *, stdout, stderr, returncode: stdout.strip()
-    mock_run.return_value = MagicMock(returncode=0, stdout="<IP_ADDRESS_0> is unreachable\n", stderr="")
+    mock_adapter.parse.side_effect = lambda *, stdout, **_kwargs: stdout.strip()
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout="<IP_ADDRESS_0> is unreachable\n", stderr=""
+    )
 
     with patch("infrastructure.safety.guardrails.evaluator.get_guardrail_evaluator") as gr:
         gr.return_value.is_active = False
@@ -290,7 +296,7 @@ def test_masking_applied_and_unmasked_in_invoke_stream(monkeypatch) -> None:
     real_ip = "10.0.1.42"
     placeholder = "<IP_ADDRESS_0>"
     half = len(placeholder) // 2
-    chunk_a = placeholder[:half]          # e.g. "<IP_ADDR"
+    chunk_a = placeholder[:half]  # e.g. "<IP_ADDR"
     chunk_b = placeholder[half:] + " is unreachable"  # e.g. "ESS_0> is unreachable"
 
     def _mock_stream(*_args, **_kwargs):

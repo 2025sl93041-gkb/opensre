@@ -125,7 +125,7 @@ def test_structured_output_unmasks_typed_field_before_validate(
     mock_adapter.build.return_value = MagicMock(
         argv=("/usr/bin/mock",), stdin=None, cwd="/tmp", env=None, timeout_sec=30.0
     )
-    mock_adapter.parse.side_effect = lambda *, stdout, stderr, returncode: stdout.strip()
+    mock_adapter.parse.side_effect = lambda *, stdout, **_kwargs: stdout.strip()
     mock_run.return_value = MagicMock(
         returncode=0, stdout='{"host": "<IP_ADDRESS_0>"}\n', stderr=""
     )
@@ -143,14 +143,13 @@ class _AnswerResult(BaseModel):
 
 
 @patch("integrations.llm_cli.runner.subprocess.run")
-def test_structured_output_deep_unmask_handles_quoted_value(
+def test_structured_output_restores_quoted_value(
     mock_run: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """_deep_unmask must restore values containing double-quote characters.
+    """Restore quoted values without corrupting the structured response.
 
     Regression for the JSON round-trip bug: json.loads(masking.unmask(json.dumps()))
-    breaks when an unmasked value contains '"'. _deep_unmask() replaces each string
-    value individually, so quote-containing values never corrupt the JSON structure.
+    breaks when an unmasked value contains '"'. Restore parsed values individually.
     """
     quoted_value = 'ab"cd'
     # Use a custom extra-regex label so the placeholder is deterministic: <QUOTED_VAL_0>
@@ -168,7 +167,7 @@ def test_structured_output_deep_unmask_handles_quoted_value(
     mock_adapter.build.return_value = MagicMock(
         argv=("/usr/bin/mock",), stdin=None, cwd="/tmp", env=None, timeout_sec=30.0
     )
-    mock_adapter.parse.side_effect = lambda *, stdout, stderr, returncode: stdout.strip()
+    mock_adapter.parse.side_effect = lambda *, stdout, **_kwargs: stdout.strip()
     mock_run.return_value = MagicMock(
         returncode=0,
         stdout=f'{{"answer": "{placeholder}"}}\n',
