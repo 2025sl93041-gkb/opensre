@@ -110,6 +110,21 @@ class MaskingRules:
         matches = find_identifiers(text, self.policy, self._compiled_extras)
         if not matches:
             return text
+        # Skip matches that fall inside an existing placeholder token so a second
+        # mask() pass over already-masked text does not nest tokens like <<ENV_1>_0>.
+        if "<" in text and self._placeholder_map:
+            occupied = [
+                (m.start(), m.end())
+                for m in _PLACEHOLDER_TOKEN_RE.finditer(text)
+                if m.group(0) in self._placeholder_map
+            ]
+            if occupied:
+                matches = [
+                    dm for dm in matches
+                    if not any(ps <= dm.start and dm.end <= pe for ps, pe in occupied)
+                ]
+        if not matches:
+            return text
         return self._apply_replacements(text, matches)
 
     def _apply_replacements(self, text: str, matches: list[DetectedIdentifier]) -> str:
